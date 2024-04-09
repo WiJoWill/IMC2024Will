@@ -32,13 +32,13 @@ class BacktestingSystem:
         # Asset Symbols/Tickers (positionable, some assets are used for indicators)
         # type: Dict (key = round number: int, value = [available symbols: str])
         self.ASSET_SYMBOLS_POSITIONABLE = {
-            0: ['STARFRUIT', 'AMETHYSTS']
+            1: ['STARFRUIT', 'AMETHYSTS']
         }
 
         # Asset Symbols/Tickers
         # type: Dict (key = round number: int, value = [available symbols: str])
         self.ASSET_SYMBOLS = {
-            0: ['STARFRUIT', 'AMETHYSTS']
+            1: ['STARFRUIT', 'AMETHYSTS']
         }
 
         # Limit for each asset
@@ -395,6 +395,6 @@ if __name__ == "__main__":
     trader = Trader()  # Assuming Trader is defined elsewhere as per the provided snippets
     backtest_system = BacktestingSystem()
     #os.chdir('IMC2024Will')
-    round = 0  # Example parameters
+    round = 1  # Example parameters
     day = 0
     backtest_system.simulate_alternative(round, day, trader)
