@@ -290,10 +290,10 @@ class BacktestingSystem:
             trades_path = os.path.join(self.TRAINING_DATA_PREFIX, f'trades_round_{round}_day_{day}_nn.csv')
         
         df_prices = pd.read_csv(prices_path, sep=';')
-        # df_trades = pd.read_csv(trades_path, sep=';', dtype = {'seller': str, 'buyer': str })
+        df_trades = pd.read_csv(trades_path, sep=';', dtype = {'seller': str, 'buyer': str })
 
         states = self.process_prices(df_prices, round, time_limit)
-        # states = self.process_trades(df_trades, states, time_limit, names)
+        states = self.process_trades(df_trades, states, time_limit, names)
         ref_symbols = list(states[0].position.keys())
         max_time = max(list(states.keys()))
 
