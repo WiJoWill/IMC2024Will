@@ -7,6 +7,9 @@ import uuid
 from datamodel import *
 from algorithm import *
 
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 '''
 first_round_pst = ['PEARLS', 'BANANAS']
 snd_round_pst = first_round_pst + ['COCONUTS',  'PINA_COLADAS']
@@ -236,7 +239,7 @@ class BacktestingSystem:
                     if trade.symbol in failed_symbol:
                         continue
                     n_position = position[trade.symbol] + trade.quantity
-                    if abs(n_position) >self.ASSET_LIMITS[trade.symbol]:
+                    if abs(n_position) > self.ASSET_LIMITS[trade.symbol]:
                         print('ILLEGAL TRADE, WOULD EXCEED POSITION LIMIT, KILLING ALL REMAINING ORDERS')
                         trade_vars = vars(trade)
                         trade_str = ', '.join("%s: %s" % item for item in trade_vars.items())
@@ -319,6 +322,8 @@ class BacktestingSystem:
             if callable(trader.after_last_round): #type: ignore
                 trader.after_last_round(profits_by_symbol, balance_by_symbol) #type: ignore
     # Additional methods for cleanup_order_volumes, clear_order_book, create_log_file, etc., similarly converted
+        
+        self.build_plots(profits_by_symbol, 'profits')
 
     def create_log_files(self, round: int, day: int, states: dict[int, TradingState], profits_by_symbol: dict[int, dict[str, float]], balance_by_symbol: dict[int, dict[str, float]], trader: Trader):
         file_name = uuid.uuid4()
@@ -389,6 +394,57 @@ class BacktestingSystem:
                             if profits_by_symbol[time].get(symbol) != None:
                                 print(f'Final profit for {symbol} = {actual_profit}')
         print(f"\nSimulation on round {round} day {day} for time {max_time} complete")
+    
+
+    def build_plots(self, data: dict[int, dict[str, float]], filename: str = 'No filename', path = 'plots/'):
+        products = list(self.ASSET_LIMITS.keys())
+
+        fig, axs = plt.subplots(len(products) + 1, 1, figsize=(10, 5 * len(products)), sharex=True)
+
+        if len(products) == 1:
+            axs = [axs]
+        
+        timestamps = []
+        total_values = {}
+        for idx, product in enumerate(products):
+            timestamps = []
+            values = []
+            for timestamp, timestamp_data in data.items():
+                if product in timestamp_data:
+                    timestamps.append(timestamp)
+                    values.append(timestamp_data[product])
+            total_values[product] = copy.copy(values)
+            axs[idx].plot(timestamps, values, label=f'{product} Value')
+            axs[idx].set_title(f'Values of {product}')
+            axs[idx].set_ylabel('Value')
+            axs[idx].legend()
+
+            axs[idx].annotate(
+                f'{values[-1]}',
+                xy = (timestamps[-1], values[-1]),
+                fontsize = 3,
+                ha='center'
+            )
+
+        for product in total_values:
+            axs[-1].plot(timestamps, total_values[product], label = f'{product} Value')
+            axs[-1].set_title('Values of  All Products')
+            axs[-1].set_ylabel('Value')
+            axs[-1].legend()
+
+            
+            axs[-1].annotate(
+                f'{product}: {total_values[product][-1]}',
+                xy = (timestamps[-1], total_values[product][-1]),
+                ha='center'
+            )
+
+
+        axs[-1].set_xlabel('Timestamp')
+        plt.tight_layout()
+        plt.savefig(path + filename, bbox_inches = 'tight')
+        plt.close(fig)
+
 
 if __name__ == "__main__":
     # Example usage
@@ -398,3 +454,4 @@ if __name__ == "__main__":
     round = 1  # Example parameters
     day = 0
     backtest_system.simulate_alternative(round, day, trader)
+    print()
