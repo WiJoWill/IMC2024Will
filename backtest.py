@@ -323,7 +323,7 @@ class BacktestingSystem:
                 trader.after_last_round(profits_by_symbol, balance_by_symbol) #type: ignore
     # Additional methods for cleanup_order_volumes, clear_order_book, create_log_file, etc., similarly converted
         
-        self.build_plots(profits_by_symbol, 'profits')
+        self.build_plots(profits_by_symbol, f'profits on round{round}-day{day}')
 
     def create_log_files(self, round: int, day: int, states: dict[int, TradingState], profits_by_symbol: dict[int, dict[str, float]], balance_by_symbol: dict[int, dict[str, float]], trader: Trader):
         file_name = uuid.uuid4()
@@ -454,4 +454,3 @@ if __name__ == "__main__":
     round = 1  # Example parameters
     day = 0
     backtest_system.simulate_alternative(round, day, trader)
-    print()
