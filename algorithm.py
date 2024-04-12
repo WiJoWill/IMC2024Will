@@ -184,14 +184,17 @@ class Trader:
     round1_products = ['AMETHYSTS', 'STARFRUIT']
 
     starfruit_coefs = {
-# "vwap": 1,
-# "vwap_change": -0.25076721339661984,
-# "imbalance_volume_signed": 0.02594159961108483,
-"best_mean": 0.9970645785765161,
-"best_mean_-1": 0.0007666006190972529,
-"best_mean_-2": 0.0003870777600799704,
-"best_mean_-3": 0.00011440834143569041,
+        # "vwap": 1,
+        # "vwap_change": -0.25076721339661984,
+        # "imbalance_volume_signed": -0.17395201352494163,
+        "best_mean": 0.9970645785765161,
+        "best_mean_-1": 0.0007666006190972529,
+        "best_mean_-2": 0.0003870777600799704,
+        "best_mean_-3": 0.00011440834143569041,
+        # "best_mean_MA_3": -0.4522749419653542,
+        # "best_mean_MA_10": 0.00012514476494644223,
     }
+    starfruit_best_mean = []
 
     starfruit_cache = {
         # "vwap": None,
@@ -201,6 +204,8 @@ class Trader:
         "best_mean_-1": None,
         "best_mean_-2": None,
         "best_mean_-3": None,
+        # "best_mean_MA_3": None,
+        # "best_mean_MA_10": None,
     }
 
     def predict_starfruit(self):
@@ -367,6 +372,7 @@ class Trader:
         
         self.starfruit_cache['imbalance_volume_signed'] = calculate_imbalance(order_depth = state.order_depths['STARFRUIT'])
         '''
+
         self.starfruit_cache['best_mean_-3'] = self.starfruit_cache['best_mean_-2']
         self.starfruit_cache['best_mean_-2'] = self.starfruit_cache['best_mean_-1']
         self.starfruit_cache['best_mean_-1'] = self.starfruit_cache['best_mean']
@@ -374,7 +380,15 @@ class Trader:
         _, best_buy_starfruit = values_extract(collections.OrderedDict(sorted(state.order_depths['STARFRUIT'].buy_orders.items(), reverse= True)), 1)
         
         self.starfruit_cache['best_mean'] = (best_buy_starfruit + best_sell_starfruit) / 2
-
+        '''
+        if len(self.starfruit_best_mean) == 10:
+            self.starfruit_best_mean.pop(0)
+            self.starfruit_best_mean.append(self.starfruit_cache['best_mean'])
+            self.starfruit_cache[ "best_mean_MA_10"] = sum(self.starfruit_best_mean) / 10
+            self.starfruit_cache[ "best_mean_MA_3"] = sum(self.starfruit_best_mean[-3:]) /3
+        else:
+            self.starfruit_best_mean.append(self.starfruit_cache['best_mean'])
+        '''
 
         if not any(value is None for value in self.starfruit_cache.values()):
             starfruit_fair_price = self.predict_starfruit()
@@ -401,6 +415,6 @@ class Trader:
         
         conversions = 1
 
-        self.logger.flush(state, result, conversions, traderData)
+        # self.logger.flush(state, result, conversions, traderData)
 
         return result, conversions, traderData
