@@ -119,6 +119,9 @@ class Logger:
         return value[:max_length - 3] + "..."
 
 
+logger = Logger()
+
+
 def calc_vwap(order_depth):
 
     buy_price = np.array([item for item in order_depth.buy_orders.keys() if not np.isnan(item)])
@@ -152,23 +155,21 @@ def calculate_imbalance(order_depth):
 
 def values_extract(order_dict, buy=0):
     total_vol = 0
-    best_val = -1
-    max_vol = -1
+    best_val = 0 if buy else 1e9
 
-    for ask, vol in order_dict.items():
+    for price, vol in order_dict.items():
         if(buy==0):
             vol *= -1
+            best_val = min(best_val, price)
+        else:
+            best_val = max(best_val, price)
         total_vol += vol
-        if total_vol > max_vol:
-            max_vol = vol
-            best_val = ask
     
     return total_vol, best_val
 
 
 class Trader:
 
-    logger = Logger()
 
     POSITION_LIMIT = {
         'AMETHYSTS': 20,
@@ -350,69 +351,63 @@ class Trader:
     def calc_round2_order(self, product: str, order_depth: OrderDepth, 
                           fair_bid: float, fair_ask: float, orchids_observation: ConversionObservation, timestamp: int = 0) -> List[Order]:
         orders: list[Order] = []
-        conversions: int = 0
+        real_bid = orchids_observation.bidPrice - orchids_observation.exportTariff - orchids_observation.transportFees - 0.1
+        real_ask = orchids_observation.askPrice + orchids_observation.importTariff + orchids_observation.transportFees
+        mm_spread = 5
         
-        LIMIT = self.POSITION_LIMIT[product]
 
         order_sell = collections.OrderedDict(sorted(order_depth.sell_orders.items()))
         order_buy = collections.OrderedDict(sorted(order_depth.buy_orders.items(), reverse=True))
-
+        print(order_sell, order_buy)
         
-        real_bid = orchids_observation.bidPrice - orchids_observation.exportTariff - orchids_observation.transportFees - 0.1
-        real_ask = orchids_observation.askPrice + orchids_observation.importTariff + orchids_observation.transportFees
+        sell_vol, best_sell_price = values_extract(order_sell)
+        buy_vol, best_buy_price = values_extract(order_buy, 1)
         
         print(f"real bid {real_bid}  real ask {real_ask}  current_pos: {self.position[product]}")
 
-        print(order_sell, order_buy)
-
         curr_pos = self.position[product]
+        LIMIT = self.POSITION_LIMIT[product]
+        
+        our_bid = int(round(real_ask)) - 1
+        our_ask = int(round(real_ask)) + 1
+
+        bid_price = min(best_buy_price + 1, our_bid)
+        ask_price = max(best_sell_price - mm_spread, our_ask, best_sell_price - 1)
+
         '''
         Implement Arbitrage just by import/export First
         '''
         for ask, vol in order_sell.items():
-            if (ask < real_bid):
+            if curr_pos < LIMIT and (ask <= our_bid or (curr_pos < 0 and ask == our_bid + 1)): # if local_ask <= southern ask - 1, or local_ask == southern ask but we have negative pos, take order
                 order_for = min(-vol, LIMIT-curr_pos)
                 curr_pos += order_for # the order is balanced by conversion
                 orders.append(Order(product, ask, order_for))
-                orders.append(Order(product, int(real_bid), -order_for))
-                conversions -= order_for
         
+        if curr_pos < LIMIT: # if we still have opportunities to send ask order, 1-sided money making with any penny opportunities
+            order_for = LIMIT - curr_pos
+            orders.append(Order(product, bid_price, order_for))
+            curr_pos += order_for
+
+        curr_pos = 0 
+
         for bid, vol in order_buy.items():
-            if (bid > real_ask):
+            if curr_pos > -LIMIT and (bid >= our_ask or (curr_pos > 0 and bid + 1 == our_ask)): # if local bid >= southern ask - 1， or local bid == southern ask when have opportunities to release pos, take order
                 order_for = max(-vol, -LIMIT-curr_pos)
                 curr_pos += order_for # the order is balanced by conversion
                 orders.append(Order(product, bid, order_for))
-                orders.append(Order(product, int(real_ask + 0.9), -order_for))
-                conversions -= order_for
-
-
-        sell_vol, best_sell_price = values_extract(order_sell)
-        buy_vol, best_buy_price = values_extract(order_buy, 1)
-
-        best_sell_price = list(order_sell.items())[0][0]
-        best_buy_price = list(order_buy.items())[0][0]
-
-        spread = (best_sell_price - best_buy_price) // 2
-        if (best_sell_price - spread) > real_ask: # if the local ask - 3 > real_ask in south, we can buy real ask and sell ask - 3 on local
-            order_for = -int(0.9 * (LIMIT - curr_pos)) # don't care for position, we can balance by conversion
-            orders.append(Order(product, best_sell_price - spread, order_for))
-            orders.append(Order(product, int(real_ask + 0.9), -order_for))
-            conversions -= order_for
-            print(f" Want to sell on local with the price {best_sell_price - spread} in {order_for} shares and would buy with the price {int(real_ask + 0.9)} in {-order_for} shares")
         
-        if (best_buy_price + spread) < real_bid: # if the local ask - 3 > real_ask in south, we can buy real ask and sell ask - 3 on local
-            order_for = int(0.6 * (LIMIT - curr_pos)) # don't care for position, we can balance by conversion
-            orders.append(Order(product, best_buy_price + spread, order_for))
-            orders.append(Order(product, int(real_bid), -order_for))
-            conversions -= order_for
-            print(f" Want to buy on local with the price {best_buy_price + spread} in {order_for} shares and would buy with the price {int(real_bid)} in {-order_for} shares")
+        if curr_pos > -LIMIT:
+            order_for = -LIMIT - curr_pos
+            orders.append(Order(product, ask_price, order_for))
+            curr_pos += order_for
 
+        return orders
         '''
         if (best_sell_price + best_buy_price) / 2 > real_ask:
             order_for = max(-min(sell_vol, buy_vol), -LIMIT - curr_pos)
             curr_pos += order_for
             orders.append(Order(product, int((best_sell_price + best_buy_price) / 2), -order_for))
-            orders.append(Order(product, int(real_ask + 0.9), order_for))
+            orders.append(Order(product, int(real_ n ask + 0.9), order_for))
             print(f" Want to sell on local with the price {int((best_sell_price + best_buy_price) / 2)} in {-order_for} shares and would buy with the price {int(real_ask + 1)} in {order_for} shares")
             conversions += order_for
         '''
@@ -564,9 +559,10 @@ class Trader:
         for product in self.round2_products:
             order_depth: OrderDepth = state.order_depths[product]
             print(f"observation -- bid:{orchids_observation.bidPrice},  ask:{orchids_observation.askPrice}, export:{orchids_observation.exportTariff},  import:{orchids_observation.importTariff}, transport;{orchids_observation.transportFees}")
-            orders, conversions = self.calc_round2_order(product, order_depth, acceptable_bids[product], acceptable_asks[product], orchids_observation, timestamp)
+            orders = self.calc_round2_order(product, order_depth, acceptable_bids[product], acceptable_asks[product], orchids_observation, timestamp)
             if orders:
                 result[product] += orders
+            conversions -= self.position[product]
     
         traderData = "" # String value holding Trader state data required. It will be delivered as TradingState.traderData on next execution.
         

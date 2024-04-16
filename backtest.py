@@ -5,7 +5,7 @@ from datetime import datetime
 import copy
 import uuid
 from datamodel import *
-from algorithm import *
+from algorithm2 import *
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -35,20 +35,24 @@ class BacktestingSystem:
         # Asset Symbols/Tickers (positionable, some assets are used for indicators)
         # type: Dict (key = round number: int, value = [available symbols: str])
         self.ASSET_SYMBOLS_POSITIONABLE = {
-            1: ['STARFRUIT', 'AMETHYSTS']
+            1: ['STARFRUIT', 'AMETHYSTS'], 
+            2: ['STARFRUIT', 'AMETHYSTS'],
+            3: ['STARFRUIT', 'AMETHYSTS'],
         }
 
         # Asset Symbols/Tickers
         # type: Dict (key = round number: int, value = [available symbols: str])
         self.ASSET_SYMBOLS = {
-            1: ['STARFRUIT', 'AMETHYSTS']
+            1: ['STARFRUIT', 'AMETHYSTS'],
+            2: ['STARFRUIT', 'AMETHYSTS'],
+            3: ['STARFRUIT', 'AMETHYSTS'],
         }
 
         # Limit for each asset
         # type: Dict (key = asset symbols: str, value = position limit: int)
         self.ASSET_LIMITS = {
             'STARFRUIT': 20,
-            'AMETHYSTS': 20
+            'AMETHYSTS': 20,
         }
 
         # Other initialization parameters as needed
