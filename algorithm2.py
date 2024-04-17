@@ -2,7 +2,7 @@ import json
 import jsonpickle
 from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState
 from typing import Any, OrderedDict
-import math
+import collections
 import numpy as np
 
 class Logger:
@@ -51,6 +51,7 @@ class Logger:
         compressed = []
         for listing in listings.values():
             compressed.append([listing["symbol"], listing["product"], listing["denomination"]])
+            # compressed.append([listing.symbol, listing.product, listing.denomination])
 
         return compressed
 
@@ -116,32 +117,37 @@ logger = Logger()
 class RecordedData: 
     def __init__(self):
         self.starfruit_cache = []
-        '''
-        self.POSITION_LIMIT = {
-            'AMETHYSTS' : 20, 
-            'STARFRUIT' : 20, 
-            'ORCHIDS': 100,
-        }
-        self.INF = int(1e9)
-        self.starfruit_dimension = 38
-        self.AME_RANGE = 2
-        self.position = {
-            'AMETHYSTS' : 0, 
-            'STARFRUIT' : 0, 
-            'ORCHIDS': 0,
-        }
-        self.orchids_mm_spread = 5
-        '''
 
 class Trader:
-    POSITION_LIMIT = {'AMETHYSTS' : 20, 'STARFRUIT' : 20, 'ORCHIDS': 100}
+    POSITION_LIMIT = {
+        'AMETHYSTS': 20,
+        'STARFRUIT': 20,
+        'ORCHIDS': 100,
+        'GIFT_BASKET': 60,
+        'CHOCOLATE': 250,
+        'STRAWBERRIES': 350,
+        'ROSES': 60,
+    }
     INF = int(1e9)
     starfruit_dimension = 38
-    AME_RANGE = 2
+    AME_RANGE = 0
     orchids_mm_spread = 5
-    position = {}
+    position = {
+        'AMETHYSTS': 0,
+        'STARFRUIT': 0,
+        'ORCHIDS': 0,
+        'GIFT_BASKET': 0,
+        'CHOCOLATE': 0,
+        'STRAWBERRIES': 0,
+        'ROSES': 0,
+    }
     round1_products = ['AMETHYSTS', 'STARFRUIT']
     round2_products = ['ORCHIDS']
+    round3_products = ['GIFT_BASKET', 'CHOCOLATE', 'STRAWBERRIES', 'ROSES']
+    basket_premium = 370
+    basket_std = 76.43
+    cont_buy_basket_unfill = 0
+    cont_sell_basket_unfill = 0
 
     def estimate_starfruit_price(self, cache, alpha = 0.2):
         '''
@@ -151,12 +157,23 @@ class Trader:
         m, c = np.linalg.lstsq(A, y, rcond=None)[0]
         return int(round(self.starfruit_dimension * m + c))
         '''
-        res = cache[0]
-        for price in cache[1:]:
-            res = alpha * price + (1-alpha) * res
-        return int(res)
+        
+        n = len(cache)
+        smoothed_prices = np.zeros(n)
+        smoothed_prices[0] = cache[0]  # Initialize the first element
 
+        for i in range(1, n):
+            smoothed_prices[i] = alpha * cache[i] + (1 - alpha) * smoothed_prices[i - 1]
 
+        x = np.array([i for i in range(self.starfruit_dimension)])
+        y = smoothed_prices
+
+        A = np.vstack([x, np.ones(len(x))]).T
+        m, c = np.linalg.lstsq(A, y, rcond=None)[0]
+        predicted_price = m * self.starfruit_dimension + c
+
+        return int(round(predicted_price))
+        
 
     def values_extract(self, orders, buy):
         volume = 0
@@ -190,41 +207,93 @@ class Trader:
         limit = self.POSITION_LIMIT[product]
 
         # penny the current highest bid / lowest ask 
-        penny_buy = best_buy_price+1
-        penny_sell = best_sell_price-1
+        undercut_buy = best_buy_price + 1
+        undercut_sell = best_sell_price - 1
 
-        bid_price = min(penny_buy, our_bid)
-        ask_price = max(penny_sell, our_ask)
+        if product == 'AMETHYSTS':
+            bid_price = min(undercut_buy, our_bid - 1)
+            sell_price = max(undercut_sell, our_ask + 1)
 
-        # MARKET TAKE ASKS (buy items)
-        for ask, vol in sell_orders.items():
-            if position < limit and (ask <= our_bid or (position < 0 and ask == our_bid+1)): 
-                num_orders = min(-vol, limit - position)
+            # Search the orders that satisfy our acceptable price
+            # ask
+            for ask, vol in sell_orders.items():
+                if ((ask < our_bid) or ((self.position[product] < 0) and (ask == our_bid))) and position < self.POSITION_LIMIT[product]:
+                    order_for = min(-vol, self.POSITION_LIMIT[product])
+                    position += order_for
+                    orders.append(Order(product, ask, order_for))
+            
+            if (position < self.POSITION_LIMIT[product]) and (self.position[product] < 0):
+                num = min(40, self.POSITION_LIMIT[product] - position)
+                orders.append(Order(product, min(undercut_buy + 1, our_bid - 1), num))
+                position += num
+
+            if (position < self.POSITION_LIMIT[product]) and (self.position[product] > 15):
+                num = min(40, self.POSITION_LIMIT[product] - position)
+                orders.append(Order(product, min(undercut_buy - 1, our_bid - 1), num))
+                position += num
+
+            if position < self.POSITION_LIMIT[product]:
+                num = min(40, self.POSITION_LIMIT[product] - position)
+                orders.append(Order(product, bid_price, num))
+                position += num
+
+            position = self.position[product]
+
+            for bid, vol in buy_orders.items():
+                if ((bid > our_ask) or ((self.position[product] > 0) and (bid == our_ask))) and position > -self.POSITION_LIMIT[product]:
+                    order_for = max(-vol, -self.POSITION_LIMIT[product]-position)
+                    # order_for is a negative number denoting how much we will sell
+                    position += order_for
+                    assert(order_for <= 0)
+                    orders.append(Order(product, bid, order_for))
+
+            if (position > -self.POSITION_LIMIT[product]) and (self.position[product] > 0):
+                num = max(-40, -self.POSITION_LIMIT[product]-position)
+                orders.append(Order(product, max(undercut_sell - 1, our_ask + 1), num))
+                position += num
+
+            if (position > -self.POSITION_LIMIT[product]) and (self.position[product] < -15):
+                num = max(-40, -self.POSITION_LIMIT[product]-position)
+                orders.append(Order(product, max(undercut_sell + 1, our_ask + 1), num))
+                position += num
+
+            if position > -self.POSITION_LIMIT[product]:
+                num = max(-40, -self.POSITION_LIMIT[product] - position)
+                orders.append(Order(product, sell_price, num))
+                position += num
+        
+        elif product == 'STARFRUIT':
+            bid_price = min(undercut_buy, our_bid)
+            ask_price = max(undercut_sell, our_ask)
+
+            # MARKET TAKE ASKS (buy items)
+            for ask, vol in sell_orders.items():
+                if position < limit and (ask <= our_bid or (position < 0 and ask == our_bid + 1)): 
+                    num_orders = min(-vol, limit - position)
+                    position += num_orders
+                    orders.append(Order(product, ask, num_orders))
+
+            # MARKET MAKE 
+            if position < limit:
+                num_orders = limit - position
+                orders.append(Order(product, bid_price, num_orders))
                 position += num_orders
-                orders.append(Order(product, ask, num_orders))
 
-        # MARKET MAKE BY PENNYING
-        if position < limit:
-            num_orders = limit - position
-            orders.append(Order(product, bid_price, num_orders))
-            position += num_orders
+            position = self.position[product]
 
-        # RESET POSITION
-        position = self.position[product]
+            # MARKET TAKE BIDS (sell items)
+            for bid, vol in buy_orders.items():
+                if position > -limit and (bid >= our_ask or (position > 0 and bid+1 == our_ask)):
+                    num_orders = max(-vol, -limit-position)
+                    position += num_orders
+                    orders.append(Order(product, bid, num_orders))
 
-        # MARKET TAKE BIDS (sell items)
-        for bid, vol in buy_orders.items():
-            if position > -limit and (bid >= our_ask or (position > 0 and bid+1 == our_ask)):
-                num_orders = max(-vol, -limit-position)
-                position += num_orders
-                orders.append(Order(product, bid, num_orders))
-
-        # MARKET MAKE BY PENNYING
-        if position > -limit:
-            num_orders = -limit - position
-            orders.append(Order(product, ask_price, num_orders))
-            position += num_orders 
-
+            # MARKET MAKE
+            if position > -limit:
+                num_orders = -limit - position
+                orders.append(Order(product, ask_price, num_orders))
+                position += num_orders 
+        
         return orders
 
 
@@ -237,7 +306,7 @@ class Trader:
         sell_vol, best_sell_price = self.values_extract(sell_orders, buy=False)
         buy_vol, best_buy_price = self.values_extract(buy_orders, buy=True)
 
-        logger.print(f'Product: {product} - best sell: {best_sell_price}, best buy: {best_buy_price}')
+        # logger.print(f'Product: {product} - best sell: {best_sell_price}, best buy: {best_buy_price}')
 
         position = 0
         limit = self.POSITION_LIMIT[product]
@@ -248,7 +317,7 @@ class Trader:
 
         bid_price = min(penny_buy, our_bid)
         ask_price = max(penny_sell, our_ask)
-        ask_price = max(best_sell_price-self.orchids_mm_spread, our_ask)
+        ask_price = max(best_sell_price - self.orchids_mm_spread, our_ask)
 
         # MARKET TAKE ASKS (buy items)
         for ask, vol in sell_orders.items():
@@ -302,18 +371,12 @@ class Trader:
         else:
             data = jsonpickle.decode(state.traderData)
 
-        # self.POSITION_LIMIT = data.POSITION_LIMIT
-        # self.INF = data.INF
-        # self.starfruit_dimension = data.starfruit_dimension
-        # self.AME_RANGE = data.AME_RANGE
-        # self.position = data.position
-        # self.orchids_mm_spread = data.orchids_mm_spread
-
         # update our position 
         for product in state.order_depths:
             self.position[product] = state.position[product] if product in state.position else 0
 
-
+        
+        # round 1
         # calculate bid/ask range
         if len(data.starfruit_cache) == self.starfruit_dimension:
             data.starfruit_cache.pop(0)
@@ -322,8 +385,8 @@ class Trader:
         data.starfruit_cache.append((best_sell_starfruit + best_buy_starfruit) / 2)
         starfruit_lb, starfruit_ub = -self.INF, self.INF
         if len(data.starfruit_cache) == self.starfruit_dimension:
-            starfruit_lb = self.estimate_starfruit_price(data.starfruit_cache)-2
-            starfruit_ub = self.estimate_starfruit_price(data.starfruit_cache)+2
+            starfruit_lb = self.estimate_starfruit_price(data.starfruit_cache) - 2
+            starfruit_ub = self.estimate_starfruit_price(data.starfruit_cache) + 2
         acceptable_bids = {
             'AMETHYSTS': 10000 - self.AME_RANGE,
             'STARFRUIT': starfruit_lb,
@@ -336,17 +399,16 @@ class Trader:
             'ORCHIDS': 0,
         }
 
-
-        # round 1
         for product in self.round1_products:
             order_depth: OrderDepth = state.order_depths[product]
             orders: list[Order] = []
 
             orders += self.calculate_round1_orders(product, order_depth, acceptable_bids[product], acceptable_asks[product])
             result[product] = orders
-            logger.print(f'placed orders: {orders}')
+            # logger.print(f'placed orders: {orders}')
 
         # round 2
+        
         for product in self.round2_products:
             order_depth: OrderDepth = state.order_depths[product]
             orders: list[Order] = []
@@ -356,15 +418,101 @@ class Trader:
             real_bid = orchids_observation.bidPrice - orchids_observation.exportTariff - orchids_observation.transportFees - 0.1
             real_ask = orchids_observation.askPrice + orchids_observation.importTariff + orchids_observation.transportFees
 
-            lower_bound = int(round(real_ask))-1
-            upper_bound = int(round(real_ask))+1
+            lower_bound = int(round(real_ask)) - 1
+            upper_bound = int(round(real_ask)) + 1
 
             orders += self.calculate_round2_orders(product, order_depth, lower_bound, upper_bound)
             conversions = -self.position[product]
             result[product] = orders
-            logger.print(f'placed orders: {orders}')
-
+            # logger.print(f'placed orders: {orders}')
+        ''''''
+        #round 3
+        round3_prices = {}
+        for product in self.round3_products:
+            order_depth: OrderDepth = state.order_depths[product]
+            _, best_sell = self.values_extract(OrderedDict(sorted(state.order_depths[product].sell_orders.items())), False)
+            _, best_buy = self.values_extract(OrderedDict(sorted(state.order_depths[product].buy_orders.items(), reverse= True)), True)
+        
+        
+        orders = self.compute_orders_basket(state.order_depths)
+        logger.print(f'placed orders: {orders}')
+        for product in self.round3_products:
+            result[product] = orders[product]
+        
         traderData = jsonpickle.encode(data)
 
         logger.flush(state, result, conversions, traderData)
+
         return result, conversions, traderData
+    
+
+    def compute_orders_basket(self, order_depths: dict[str, OrderDepth])-> dict[str, list]:
+        prods = self.round3_products # ['GIFT_BASKET', 'CHOCOLATE', 'STRAWBERRIES', 'ROSES']
+        orders = {p: [] for p in prods}
+        osell, obuy, best_sell, best_buy, worst_sell, worst_buy, mid_price, vol_buy, vol_sell = {}, {}, {}, {}, {}, {}, {}, {}, {}
+
+        for p in prods:
+            osell[p] = collections.OrderedDict(sorted(order_depths[p].sell_orders.items()))
+            obuy[p] = collections.OrderedDict(sorted(order_depths[p].buy_orders.items(), reverse=True))
+
+            best_sell[p] = next(iter(osell[p]))
+            best_buy[p] = next(iter(obuy[p]))
+
+            worst_sell[p] = next(reversed(osell[p]))
+            worst_buy[p] = next(reversed(obuy[p]))
+
+            mid_price[p] = (best_sell[p] + best_buy[p])/2
+            vol_buy[p], vol_sell[p] = 0, 0
+            for price, vol in obuy[p].items():
+                vol_buy[p] += vol 
+                if vol_buy[p] >= self.POSITION_LIMIT[p]/10:
+                    break
+            for price, vol in osell[p].items():
+                vol_sell[p] += -vol 
+                if vol_sell[p] >= self.POSITION_LIMIT[p]/10:
+                    break
+
+        res_buy = mid_price['GIFT_BASKET'] - mid_price['CHOCOLATE']*4 - mid_price['STRAWBERRIES']*6 - mid_price['ROSES'] - self.basket_premium
+        res_sell = mid_price['GIFT_BASKET'] - mid_price['CHOCOLATE']*4 - mid_price['STRAWBERRIES']*6 - mid_price['ROSES'] - self.basket_premium
+
+        trade_at = self.basket_std * 0.5
+
+        pb_pos = self.position['GIFT_BASKET']
+        pb_neg = self.position['GIFT_BASKET']
+
+        basket_buy_sig = 0
+        basket_sell_sig = 0
+
+        if self.position['GIFT_BASKET'] == self.POSITION_LIMIT['GIFT_BASKET']:
+            self.cont_buy_basket_unfill = 0
+        if self.position['GIFT_BASKET'] == -self.POSITION_LIMIT['GIFT_BASKET']:
+            self.cont_sell_basket_unfill = 0
+
+
+        if res_sell > trade_at:
+            vol = self.position['GIFT_BASKET'] + self.POSITION_LIMIT['GIFT_BASKET']
+            self.cont_buy_basket_unfill = 0 # no need to buy rn
+            assert(vol >= 0)
+            if vol > 0:
+                basket_sell_sig = 1
+                orders['GIFT_BASKET'].append(Order('GIFT_BASKET', worst_buy['GIFT_BASKET'], -vol)) # sell
+                orders['CHOCOLATE'].append(Order('CHOCOLATE', worst_sell['CHOCOLATE'], vol * 4))
+                orders['STRAWBERRIES'].append(Order('STRAWBERRIES', worst_sell['STRAWBERRIES'], vol * 6))
+                orders['ROSES'].append(Order('ROSES', worst_sell['ROSES'], vol))
+                self.cont_sell_basket_unfill += 2
+                pb_neg -= vol
+        elif res_buy < -trade_at:
+            vol = self.POSITION_LIMIT['GIFT_BASKET'] - self.position['GIFT_BASKET']
+            self.cont_sell_basket_unfill = 0 # no need to sell rn
+            assert(vol >= 0)
+            if vol > 0:
+                basket_buy_sig = 1
+                orders['GIFT_BASKET'].append(Order('GIFT_BASKET', worst_sell['GIFT_BASKET'], vol))
+                orders['CHOCOLATE'].append(Order('CHOCOLATE', worst_buy['CHOCOLATE'], -vol * 4))
+                orders['STRAWBERRIES'].append(Order('STRAWBERRIES', worst_buy['STRAWBERRIES'], -vol * 6))
+                orders['ROSES'].append(Order('ROSES', worst_buy['ROSES'], -vol))
+                
+                self.cont_buy_basket_unfill += 2
+                pb_pos += vol
+
+        return orders

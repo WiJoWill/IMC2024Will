@@ -37,7 +37,7 @@ class BacktestingSystem:
         self.ASSET_SYMBOLS_POSITIONABLE = {
             1: ['STARFRUIT', 'AMETHYSTS'], 
             2: ['STARFRUIT', 'AMETHYSTS'],
-            3: ['STARFRUIT', 'AMETHYSTS'],
+            3: ['GIFT_BASKET', 'CHOCOLATE', 'STRAWBERRIES', 'ROSES'],
         }
 
         # Asset Symbols/Tickers
@@ -45,14 +45,19 @@ class BacktestingSystem:
         self.ASSET_SYMBOLS = {
             1: ['STARFRUIT', 'AMETHYSTS'],
             2: ['STARFRUIT', 'AMETHYSTS'],
-            3: ['STARFRUIT', 'AMETHYSTS'],
+            3: ['GIFT_BASKET', 'CHOCOLATE', 'STRAWBERRIES', 'ROSES'],
         }
 
         # Limit for each asset
         # type: Dict (key = asset symbols: str, value = position limit: int)
         self.ASSET_LIMITS = {
-            'STARFRUIT': 20,
             'AMETHYSTS': 20,
+            'STARFRUIT': 20,
+            'ORCHIDS': 100,
+            'CHOCOLATE': 250,
+            'STRAWBERRIES': 350,
+            'ROSES': 60,
+            'GIFT_BASKET': 60,
         }
 
         # Other initialization parameters as needed
@@ -220,8 +225,10 @@ class BacktestingSystem:
     
     def trades_position_pnl_run(self, states: dict[int, TradingState], max_time: int, profits_by_symbol: dict[int, dict[str, float]], 
         balance_by_symbol: dict[int, dict[str, float]], credit_by_symbol: dict[int, dict[str, float]], unrealized_by_symbol: dict[int, dict[str, float]], halfway: str):
+        traderData = ""
         for time, state in states.items():
             position = copy.deepcopy(state.position)
+            state.traderData = traderData
             orders, conversion, traderData  = trader.run(state)
             trades = self.clear_order_book(orders, state.order_depths, time, halfway)
             mids = self.calc_mid(states, round, time, max_time)
@@ -327,7 +334,7 @@ class BacktestingSystem:
                 trader.after_last_round(profits_by_symbol, balance_by_symbol) #type: ignore
     # Additional methods for cleanup_order_volumes, clear_order_book, create_log_file, etc., similarly converted
         
-        self.build_plots(profits_by_symbol, f'profits on round{round}-day{day}')
+        self.build_plots(profits_by_symbol, round, day)
 
     def create_log_files(self, round: int, day: int, states: dict[int, TradingState], profits_by_symbol: dict[int, dict[str, float]], balance_by_symbol: dict[int, dict[str, float]], trader: Trader):
         file_name = uuid.uuid4()
@@ -400,8 +407,9 @@ class BacktestingSystem:
         print(f"\nSimulation on round {round} day {day} for time {max_time} complete")
     
 
-    def build_plots(self, data: dict[int, dict[str, float]], filename: str = 'No filename', path = 'plots/'):
-        products = list(self.ASSET_LIMITS.keys())
+    def build_plots(self, data: dict[int, dict[str, float]], round: int, day: int, filename: int  = 'None', path = 'plots/'):
+        filename = f'profits on round{round}-day{day}'
+        products = self.ASSET_SYMBOLS[round]
 
         fig, axs = plt.subplots(len(products) + 1, 1, figsize=(10, 5 * len(products)), sharex=True)
 
@@ -455,6 +463,6 @@ if __name__ == "__main__":
     trader = Trader()  # Assuming Trader is defined elsewhere as per the provided snippets
     backtest_system = BacktestingSystem()
     #os.chdir('IMC2024Will')
-    round = 1  # Example parameters
-    day = 0
+    round = 3  # Example parameters
+    day = 2
     backtest_system.simulate_alternative(round, day, trader)
