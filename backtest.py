@@ -10,21 +10,6 @@ from algorithm2 import *
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-'''
-first_round_pst = ['PEARLS', 'BANANAS']
-snd_round_pst = first_round_pst + ['COCONUTS',  'PINA_COLADAS']
-third_round_pst = snd_round_pst + ['DIVING_GEAR', 'BERRIES']
-fourth_round_pst = third_round_pst + ['BAGUETTE', 'DIP', 'UKULELE', 'PICNIC_BASKET']
-fifth_round_pst = fourth_round_pst # + secret, maybe pirate gold?
-
-SYMBOLS_BY_ROUND_POSITIONABLE = {
-    1: first_round_pst,
-    2: snd_round_pst,
-    3: third_round_pst,
-    4: fourth_round_pst,
-    5: fifth_round_pst,
-}
-'''
 
 class BacktestingSystem:
     def __init__(self, training_data_prefix="./training", time_delta = 100):
@@ -466,5 +451,5 @@ if __name__ == "__main__":
     backtest_system = BacktestingSystem()
     #os.chdir('IMC2024Will')
     round = 3  # Example parameters
-    day = 2
+    day = 0
     backtest_system.simulate_alternative(round, day, trader)
