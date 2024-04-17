@@ -438,6 +438,8 @@ class BacktestingSystem:
                 ha='center'
             )
 
+            
+
         for product in total_values:
             axs[-1].plot(timestamps, total_values[product], label = f'{product} Value')
             axs[-1].set_title('Values of  All Products')
