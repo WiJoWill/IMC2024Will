@@ -5,7 +5,7 @@ from datetime import datetime
 import copy
 import uuid
 from datamodel import *
-from algorithm2 import *
+from ROUND_3_FINAL import *
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -450,6 +450,6 @@ if __name__ == "__main__":
     trader = Trader()  # Assuming Trader is defined elsewhere as per the provided snippets
     backtest_system = BacktestingSystem()
     #os.chdir('IMC2024Will')
-    round = 3  # Example parameters
-    day = 2
+    round = 1 # Example parameters
+    day = 0
     backtest_system.simulate_alternative(round, day, trader)

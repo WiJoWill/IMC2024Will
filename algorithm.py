@@ -237,7 +237,6 @@ class Trader:
             buy_vol, best_buy_price = values_extract(order_buy, 1)
 
             curr_pos = self.position[product]
-            max_for_buy = -1
 
             undercut_buy = best_buy_price + 1
             undercut_sell = best_sell_price - 1
@@ -250,7 +249,6 @@ class Trader:
             # ask
             for ask, vol in order_sell.items():
                 if ((ask < fair_bid) or ((self.position[product] < 0) and (ask == fair_ask))) and curr_pos < self.POSITION_LIMIT[product]:
-                    max_for_buy = max(max_for_buy, ask)
                     order_for = min(-vol, self.POSITION_LIMIT[product])
                     curr_pos += order_for
                     orders.append(Order(product, ask, order_for))
