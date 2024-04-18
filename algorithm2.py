@@ -50,8 +50,8 @@ class Logger:
     def compress_listings(self, listings: dict[Symbol, Listing]) -> list[list[Any]]:
         compressed = []
         for listing in listings.values():
-            # compressed.append([listing["symbol"], listing["product"], listing["denomination"]])
-            compressed.append([listing.symbol, listing.product, listing.denomination])
+            compressed.append([listing["symbol"], listing["product"], listing["denomination"]])
+            # compressed.append([listing.symbol, listing.product, listing.denomination])
 
         return compressed
 
@@ -117,6 +117,8 @@ logger = Logger()
 class RecordedData: 
     def __init__(self):
         self.starfruit_cache = []
+        self.basket_spread_cache = []
+        # self.strawberries_cache = []
 
 class Trader:
     POSITION_LIMIT = {
@@ -128,10 +130,6 @@ class Trader:
         'STRAWBERRIES': 350,
         'ROSES': 60,
     }
-    INF = int(1e9)
-    starfruit_dimension = 38
-    AME_RANGE = 0
-    orchids_mm_spread = 5
     position = {
         'AMETHYSTS': 0,
         'STARFRUIT': 0,
@@ -144,14 +142,29 @@ class Trader:
     round1_products = ['AMETHYSTS', 'STARFRUIT']
     round2_products = ['ORCHIDS']
     round3_products = ['GIFT_BASKET', 'CHOCOLATE', 'STRAWBERRIES', 'ROSES']
+
+    INF = int(1e9)
+
+    starfruit_dimension = 38
+    AME_RANGE = 0
+
+    orchids_mm_spread = 5
+    
     basket_premium = 379.5
     basket_premium_std = 76.43
+    basket_premium_mean = 9.5
     cont_buy_basket_unfill = 0
     cont_sell_basket_unfill = 0
     basket_maxedge = 250
+    basket_cache_dimension = 5000
+    strawberry_momentum_signal = 0
+    strawberry_long_window = 1200
+
+
+
 
     def estimate_starfruit_price(self, cache, alpha = 0.2):
-        '''
+        
         x = np.array([i for i in range(self.starfruit_dimension)])
         y = np.array(cache)
         A = np.vstack([x, np.ones(len(x))]).T
@@ -174,7 +187,7 @@ class Trader:
         predicted_price = m * self.starfruit_dimension + c
 
         return int(round(predicted_price))
-        
+        '''
 
     def values_extract(self, orders, buy):
         volume = 0
@@ -371,7 +384,6 @@ class Trader:
         for product in state.order_depths:
             self.position[product] = state.position[product] if product in state.position else 0
 
-        '''
         # round 1
         # calculate bid/ask range
         if len(data.starfruit_cache) == self.starfruit_dimension:
@@ -421,14 +433,9 @@ class Trader:
             conversions = -self.position[product]
             result[product] = orders
             # logger.print(f'placed orders: {orders}')
-        '''
         #round 3
-        '''
-        if len(data.basket_spread_cache) == self.basket_edge_dimension:
-            self.basket_maxedge = max(abs(max(data.basket_spread_cache)), abs(min(data.basket_spread_cache)))
-            self.basket_premium_std = np.std(data.basket_spread_cache)
-            data.basket_spread_cache.pop(0)
-        '''
+        
+        # if len(data.strawberries_cache) == self.strawberry_long_window: data.strawberries_cache.pop(0)
         for product in self.round3_products:
             order_depth: OrderDepth = state.order_depths[product]
             _, best_sell = self.values_extract(OrderedDict(sorted(state.order_depths[product].sell_orders.items())), False)
@@ -475,7 +482,6 @@ class Trader:
 
         res_buy = mid_price['GIFT_BASKET'] - mid_price['CHOCOLATE']*4 - mid_price['STRAWBERRIES']*6 - mid_price['ROSES'] - self.basket_premium
         res_sell = mid_price['GIFT_BASKET'] - mid_price['CHOCOLATE']*4 - mid_price['STRAWBERRIES']*6 - mid_price['ROSES'] - self.basket_premium
-        # data.basket_spread_cache.append(res_buy)
 
         trade_at = self.basket_premium_std * 0.5
 
@@ -496,7 +502,7 @@ class Trader:
                 basket_sell_sig = 1
                 orders['GIFT_BASKET'].append(Order('GIFT_BASKET', worst_buy['GIFT_BASKET'], -vol)) # sell
                 if res_sell > trade_at * 1.6:
-                    orders['CHOCOLATE'].append(Order('CHOCOLATE', worst_sell['CHOCOLATE'], vol * 4))
+                    orders['CHOCOLATE'].append(Order('CHOCOLATE', worst_sell['CHOCOLATE'], int(vol * 4.2)))
                     orders['STRAWBERRIES'].append(Order('STRAWBERRIES', worst_sell['STRAWBERRIES'], vol * 6))
                     orders['ROSES'].append(Order('ROSES', worst_sell['ROSES'], vol))
                 self.cont_sell_basket_unfill += 2
@@ -509,8 +515,8 @@ class Trader:
                 basket_buy_sig = 1
                 orders['GIFT_BASKET'].append(Order('GIFT_BASKET', worst_sell['GIFT_BASKET'], vol))
                 if res_buy < -trade_at * 1.6:
-                    orders['CHOCOLATE'].append(Order('CHOCOLATE', worst_buy['CHOCOLATE'], -vol * 4))
-                    orders['STRAWBERRIES'].append(Order('STRAWBERRIES', worst_buy['STRAWBERRIES'], -vol * 6))
+                    orders['CHOCOLATE'].append(Order('CHOCOLATE', worst_buy['CHOCOLATE'], -int(vol * 4.2)))
+                    orders['STRAWBERRIES'].append(Order('STRAWBERRIES', worst_buy['STRAWBERRIES'], vol * 6))
                     orders['ROSES'].append(Order('ROSES', worst_buy['ROSES'], -vol))
                 self.cont_buy_basket_unfill += 2
                 pb_pos += vol
@@ -539,37 +545,36 @@ class Trader:
         res_sell = mid_price['GIFT_BASKET'] - mid_price['CHOCOLATE']*4 - mid_price['STRAWBERRIES']*6 - mid_price['ROSES'] - self.basket_premium
         # data.basket_spread_cache.append(res_buy)
 
-        trade_at = self.basket_premium_std * 0.5
+        trade_at = self.basket_premium_std
         position = self.position['GIFT_BASKET']
 
         if res_sell > trade_at:
-            target_vol = -res_sell / (self.basket_maxedge) * self.POSITION_LIMIT['GIFT_BASKET'] # < 0
-            vol = self.position['GIFT_BASKET'] + self.POSITION_LIMIT['GIFT_BASKET']
-            vol = int(min(vol, abs(target_vol - position)))
+            target_vol = -res_sell / (self.basket_maxedge * 0.95) * self.POSITION_LIMIT['GIFT_BASKET'] # < 0
+            # vol = 
+            
+            vol = int(abs(target_vol - position)) if res_sell < 1.5 * trade_at else self.position['GIFT_BASKET'] + self.POSITION_LIMIT['GIFT_BASKET']
             assert(vol >= 0)
             if vol > 0:
                 basket_sell_sig = 1
-                orders['GIFT_BASKET'].append(Order('GIFT_BASKET', worst_buy['GIFT_BASKET'], -vol)) # sell
-                if res_sell > trade_at * 1.5:
-                    orders['CHOCOLATE'].append(Order('CHOCOLATE', worst_sell['CHOCOLATE'], vol * 4))
-                    orders['STRAWBERRIES'].append(Order('STRAWBERRIES', worst_sell['STRAWBERRIES'], vol * 6))
-                    orders['ROSES'].append(Order('ROSES', worst_sell['ROSES'], vol))
+                orders['GIFT_BASKET'].append(Order('GIFT_BASKET', best_buy['GIFT_BASKET'], -vol)) # sell
+                orders['CHOCOLATE'].append(Order('CHOCOLATE', worst_sell['CHOCOLATE'], vol * 4))
+                orders['STRAWBERRIES'].append(Order('STRAWBERRIES', worst_sell['STRAWBERRIES'], vol * 6))
+                orders['ROSES'].append(Order('ROSES', worst_sell['ROSES'], vol))
         elif res_buy < -trade_at:
-            target_vol = -res_buy / (self.basket_maxedge) * self.POSITION_LIMIT['GIFT_BASKET'] # > 0
-            vol = self.POSITION_LIMIT['GIFT_BASKET'] - self.position['GIFT_BASKET']
-            vol = int(min(vol, abs(target_vol - position)))
+            target_vol = -res_buy / (self.basket_maxedge * 0.95) * self.POSITION_LIMIT['GIFT_BASKET'] # > 0
+            #vol = self.POSITION_LIMIT['GIFT_BASKET'] - self.position['GIFT_BASKET']
+            vol = int(abs(target_vol - position)) if res_sell > -trade_at * 1.5 else self.POSITION_LIMIT['GIFT_BASKET'] - self.position['GIFT_BASKET']
             assert(vol >= 0)
             if vol > 0:
                 basket_buy_sig = 1
-                orders['GIFT_BASKET'].append(Order('GIFT_BASKET', worst_sell['GIFT_BASKET'], vol))
-                if res_buy < -trade_at * 1.5:
-                    orders['CHOCOLATE'].append(Order('CHOCOLATE', worst_buy['CHOCOLATE'], -vol * 4))
-                    orders['STRAWBERRIES'].append(Order('STRAWBERRIES', worst_buy['STRAWBERRIES'], -vol * 6))
-                    orders['ROSES'].append(Order('ROSES', worst_buy['ROSES'], -vol))
+                orders['GIFT_BASKET'].append(Order('GIFT_BASKET', best_sell['GIFT_BASKET'], vol))
+                orders['CHOCOLATE'].append(Order('CHOCOLATE', worst_buy['CHOCOLATE'], -vol * 4))
+                orders['STRAWBERRIES'].append(Order('STRAWBERRIES', worst_buy['STRAWBERRIES'], -vol * 6))
+                orders['ROSES'].append(Order('ROSES', worst_buy['ROSES'], -vol))
 
         return orders
     
-
+'''
     def compute_orders_basket_v3(self, order_depths: dict[str, OrderDepth], data = None)-> dict[str, list]:
         prods = self.round3_products # ['GIFT_BASKET', 'CHOCOLATE', 'STRAWBERRIES', 'ROSES']
         orders = {p: [] for p in prods}
@@ -600,10 +605,14 @@ class Trader:
         res_sell = mid_price['GIFT_BASKET'] - mid_price['CHOCOLATE']*4 - mid_price['STRAWBERRIES']*6 - mid_price['ROSES'] - self.basket_premium
         # data.basket_spread_cache.append(res_buy)
 
+        data.strawberries_cache.append(mid_price['STRAWBERRIES'])
+        self.estimate_strawberries_price(cache = data.strawberries_cache)
+
         trade_at = self.basket_premium_std * 0.5
 
         pb_pos = self.position['GIFT_BASKET']
         pb_neg = self.position['GIFT_BASKET']
+        strawberries_position = self.position['STRAWBERRIES']
 
         if self.position['GIFT_BASKET'] == self.POSITION_LIMIT['GIFT_BASKET']:
             self.cont_buy_basket_unfill = 0
@@ -616,11 +625,11 @@ class Trader:
             self.cont_buy_basket_unfill = 0 # no need to buy rn
             assert(vol >= 0)
             if vol > 0:
-                basket_sell_sig = 1
                 orders['GIFT_BASKET'].append(Order('GIFT_BASKET', worst_buy['GIFT_BASKET'], -vol)) # sell
                 if res_sell > trade_at * 1.6:
                     orders['CHOCOLATE'].append(Order('CHOCOLATE', worst_sell['CHOCOLATE'], vol * 4))
                     orders['STRAWBERRIES'].append(Order('STRAWBERRIES', worst_sell['STRAWBERRIES'], vol * 6))
+                    strawberries_position += vol * 6
                     orders['ROSES'].append(Order('ROSES', worst_sell['ROSES'], vol))
                 self.cont_sell_basket_unfill += 2
                 pb_neg -= vol
@@ -634,12 +643,76 @@ class Trader:
                 if res_buy < -trade_at * 1.6:
                     orders['CHOCOLATE'].append(Order('CHOCOLATE', worst_buy['CHOCOLATE'], -vol * 4))
                     orders['STRAWBERRIES'].append(Order('STRAWBERRIES', worst_buy['STRAWBERRIES'], -vol * 6))
+                    strawberries_position -= vol * 6
                     orders['ROSES'].append(Order('ROSES', worst_buy['ROSES'], -vol))
                 self.cont_buy_basket_unfill += 2
                 pb_pos += vol
 
+        if self.strawberry_momentum_signal == 1: #buy
+            vol = self.POSITION_LIMIT['STRAWBERRIES'] - strawberries_position
+            orders['STRAWBERRIES'].append(Order('STRAWBERRIES', best_buy['STRAWBERRIES'] + 1, vol))
+        elif self.strawberry_momentum_signal == -1: # sell
+            vol = -self.POSITION_LIMIT['STRAWBERRIES'] - strawberries_position
+            orders['STRAWBERRIES'].append(Order('STRAWBERRIES', best_sell['STRAWBERRIES'] - 1, vol))
+
         return orders
+    
+    def calculate_ema(self, prices, window):
+        if len(prices) < window:
+            # Not enough points to calculate EMA
+            return prices[0]  # Return the first available price as a simple workaround
+        ema = [sum(prices[:window]) / window]
+        multiplier = 2 / (window + 1)
+        for price in prices[-window:]:
+            ema.append((price - ema[-1]) * multiplier + ema[-1])
+        return ema[-1]
 
+    def calculate_rsi(self, prices, rsi_period = 20):
+        if len(prices) < rsi_period:
+            return 50  # Neutral RSI value
+        deltas = np.diff(prices)
+        seed = deltas[:rsi_period+1]
+        up = seed[seed >= 0].sum()/rsi_period
+        down = -seed[seed < 0].sum()/rsi_period
+        rs = up/down
+        rsi = np.zeros_like(prices)
+        rsi[:rsi_period] = 100. - 100./(1.+rs)
 
-    def strawberries_momentum_strategy(self, cache):
-        orders: list[Order] = []
+        for i in range(rsi_period, len(prices)):
+            delta = deltas[i - 1]  # cause the diff is 1 shorter
+
+            if delta > 0:
+                upval = delta
+                downval = 0.
+            else:
+                upval = 0.
+                downval = -delta
+
+            up = (up*(rsi_period-1) + upval)/rsi_period
+            down = (down*(rsi_period-1) + downval)/rsi_period
+
+            rs = up/down
+            rsi[i] = 100. - 100./(1.+rs)
+
+        return rsi[-1]
+
+    def estimate_strawberries_price(self, cache, short_window = 250, long_window = strawberry_long_window, rsi_period = 100):
+        if len(cache) < max(short_window, long_window, rsi_period):
+            self.strawberry_momentum_signal = 0
+
+        # Prices should be a numpy array
+        prices = np.array(cache)
+
+        # Calculate EMAs
+        short_ema = self.calculate_ema(prices, short_window)
+        long_ema = self.calculate_ema(prices, long_window)
+        rsi = self.calculate_rsi(prices)
+
+        # Generate signals based on EMA crossovers and RSI for filtering
+        if short_ema > long_ema and rsi < 70:
+            self.strawberry_momentum_signal = 1
+        elif short_ema < long_ema and rsi > 30:
+            self.strawberry_momentum_signal = -1
+        else:
+            self.strawberry_momentum_signal = 0
+'''

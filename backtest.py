@@ -451,5 +451,5 @@ if __name__ == "__main__":
     backtest_system = BacktestingSystem()
     #os.chdir('IMC2024Will')
     round = 3  # Example parameters
-    day = 0
+    day = 2
     backtest_system.simulate_alternative(round, day, trader)
