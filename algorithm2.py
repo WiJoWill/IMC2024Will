@@ -160,7 +160,7 @@ class Trader:
     cont_sell_basket_unfill = 0
     basket_maxedge = 250
     strawberry_momentum_signal = 0
-    strawberry_long_window = 1500
+    strawberry_long_window = 1200
 
     def estimate_starfruit_price(self, cache, alpha = 0.2):
         data = pd.Series(cache)
@@ -384,7 +384,7 @@ class Trader:
         # update our position 
         for product in state.order_depths:
             self.position[product] = state.position[product] if product in state.position else 0
-        
+        '''
         # round 1
         # calculate bid/ask range
         if len(data.starfruit_cache) == self.starfruit_dimension:
@@ -407,7 +407,7 @@ class Trader:
             'STARFRUIT': starfruit_ub,
             'ORCHIDS': 0,
         }
-
+        
         for product in self.round1_products:
             order_depth: OrderDepth = state.order_depths[product]
             orders: list[Order] = []
@@ -434,7 +434,7 @@ class Trader:
             conversions = -self.position[product]
             result[product] = orders
             # logger.print(f'placed orders: {orders}')
-        
+        '''
         #round 3
         if len(data.strawberries_cache) == self.strawberry_long_window: data.strawberries_cache.pop(0)
         for product in self.round3_products:
@@ -640,11 +640,11 @@ class Trader:
                     orders['ROSES'].append(Order('ROSES', worst_buy['ROSES'], -vol))
                 self.cont_buy_basket_unfill += 2
                 pb_pos += vol
-        '''
+        
         product = 'STRAWBERRIES'
         position = strawberries_position
         undercut_buy, undercut_sell = best_buy[product] + 1, best_sell[product] - 1
-        our_bid, our_ask = strawberries_price - 1, strawberries_price + 1
+        our_bid, our_ask = int(strawberries_price * 1.005), int(strawberries_price * 0.995)
         bid_price = min(undercut_buy, our_bid)
         ask_price = max(undercut_sell, our_ask)
 
@@ -665,7 +665,7 @@ class Trader:
                     num_orders = max(-vol, -self.POSITION_LIMIT[product] - position)
                     position += num_orders
                     orders[product].append(Order(product, bid, num_orders))
-        '''
+        
         return orders
 
     def calculate_rsi(self, prices, rsi_period = 20):
@@ -697,7 +697,7 @@ class Trader:
 
         return rsi[-1]
 
-    def estimate_strawberries_price(self, cache, short_window = 300, long_window = strawberry_long_window, rsi_period = 100):
+    def estimate_strawberries_price(self, cache, short_window = 250, long_window = strawberry_long_window, rsi_period = 100):
         if len(cache) < max(short_window, long_window, rsi_period):
             self.strawberry_momentum_signal = 0
 
@@ -709,16 +709,16 @@ class Trader:
         ewma_long = prices_series.ewm(span=long_window, adjust=False).mean()
         
         # The latest values of the EWMAs are our indicators
-        short_term_indicator = ewma_short.iloc[-1]
-        long_term_indicator = ewma_long.iloc[-1]
+        macd_line = ewma_long - ewma_short
+        signal_line = macd_line.ewm(span = 20, adjust=False).mean()
         rsi = self.calculate_rsi(np.array(cache), rsi_period)
 
         # Generate signals based on EMA crossovers and RSI for filtering
-        if short_term_indicator > long_term_indicator and rsi < 70:
+        if macd_line.iloc[-1] > signal_line.iloc[-1] and rsi < 70:
             self.strawberry_momentum_signal = 1
-        elif short_term_indicator < long_term_indicator and rsi > 30:
+        elif macd_line.iloc[-1] < signal_line.iloc[-1] and rsi > 30:
             self.strawberry_momentum_signal = -1
         else:
             self.strawberry_momentum_signal = 0
 
-        return short_term_indicator
+        return ewma_short.iloc[-1]
