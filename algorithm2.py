@@ -483,7 +483,7 @@ class Trader:
             'STARFRUIT': starfruit_ub,
             'ORCHIDS': 0,
         }
-
+        
         for product in self.round1_products:
             order_depth: OrderDepth = state.order_depths[product]
             orders: list[Order] = []
