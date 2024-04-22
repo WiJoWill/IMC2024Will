@@ -5,7 +5,7 @@ from datetime import datetime
 import copy
 import uuid
 from datamodel import *
-from ROUND_3_FINAL import *
+from algorithm2 import *
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -23,6 +23,7 @@ class BacktestingSystem:
             1: ['STARFRUIT', 'AMETHYSTS'], 
             2: ['STARFRUIT', 'AMETHYSTS'],
             3: ['GIFT_BASKET', 'CHOCOLATE', 'STRAWBERRIES', 'ROSES'],
+            4: ['COCONUT', 'COCONUT_COUPON'],
         }
 
         # Asset Symbols/Tickers
@@ -31,6 +32,7 @@ class BacktestingSystem:
             1: ['STARFRUIT', 'AMETHYSTS'],
             2: ['STARFRUIT', 'AMETHYSTS'],
             3: ['GIFT_BASKET', 'CHOCOLATE', 'STRAWBERRIES', 'ROSES'],
+            4: ['COCONUT', 'COCONUT_COUPON'],
         }
 
         # Limit for each asset
@@ -43,6 +45,8 @@ class BacktestingSystem:
             'STRAWBERRIES': 350,
             'ROSES': 60,
             'GIFT_BASKET': 60,
+            'COCONUT': 300,
+            'COCONUT_COUPON': 600
         }
 
         # Other initialization parameters as needed
@@ -372,7 +376,7 @@ class BacktestingSystem:
                         f.write(f';;;;;;')
 
 
-                    if len(asks_prices) == 0 or max(bids_prices) == 0:
+                    if len(asks_prices) == 0 or len(bids_prices) == 0:
                         if symbol == 'DOLPHIN_SIGHTINGS':
                             dolphin_sightings = state.observations['DOLPHIN_SIGHTINGS']
                             f.write(f'{dolphin_sightings};{0.0}\n')
@@ -450,6 +454,6 @@ if __name__ == "__main__":
     trader = Trader()  # Assuming Trader is defined elsewhere as per the provided snippets
     backtest_system = BacktestingSystem()
     #os.chdir('IMC2024Will')
-    round = 1 # Example parameters
-    day = 0
+    round = 4 # Example parameters
+    day = 3
     backtest_system.simulate_alternative(round, day, trader)
