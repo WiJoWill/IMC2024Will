@@ -6,6 +6,7 @@ import collections
 import numpy as np
 import pandas as pd
 import math
+import copy
 
 class Logger:
     def __init__(self) -> None:
@@ -65,8 +66,24 @@ class Logger:
             compressed[symbol] = [order_depth.buy_orders, order_depth.sell_orders]
 
         return compressed
-
+    
     def compress_trades(self, trades: dict[Symbol, list[Trade]]) -> list[list[Any]]:
+        compressed = []
+        for arr in trades.values():
+            for trade in arr:
+                compressed.append([
+                    trade.symbol,
+                    trade.price,
+                    trade.quantity,
+                    trade.buyer,
+                    trade.seller,
+                    trade.timestamp,
+                ])
+
+        return compressed
+
+    @staticmethod
+    def compress_trades_static(trades: dict[Symbol, list[Trade]]) -> list[list[Any]]:
         compressed = []
         for arr in trades.values():
             for trade in arr:
@@ -122,6 +139,7 @@ class RecordedData:
     def __init__(self):
         self.starfruit_cache = []
         # self.basket_spread_cache = []
+        self.person_position = collections.defaultdict(dict)
         self.strawberries_cache = []
         self.coconut_coupon_implied_vol_cache = []
         self.coconut_coupon_implied_vol_size = 1000
@@ -161,8 +179,8 @@ class Trader:
 
     orchids_mm_spread = 5
     
-    basket_premium = 370.27 # 379.5
-    basket_premium_std = 79.4 # 76.43
+    basket_premium = 379.5
+    basket_premium_std = 76.43
     basket_premium_mean = 9.5
     cont_buy_basket_unfill = 0
     cont_sell_basket_unfill = 0
@@ -172,6 +190,7 @@ class Trader:
 
     coconut_coupon_implied_vol = 0.010043927128326914
     coconut_coupon_z_score = 1.2
+    coconut_coupon_spread = 3
 
     def values_extract(self, orders, buy):
         volume = 0
@@ -186,7 +205,7 @@ class Trader:
                 best = min(best, price)
 
         return volume, best
-    
+
 
     def black_scholes_price(self, S, K = 10000, t = 250,  r = 0, sigma = coconut_coupon_implied_vol, delta = False):
         def cdf(x):
@@ -460,6 +479,14 @@ class Trader:
         # update our position 
         for product in state.order_depths:
             self.position[product] = state.position[product] if product in state.position else 0
+
+        # round 5 info
+        for product in state.market_trades.keys():
+            for trade in state.market_trades[product]:
+                if trade.buyer == trade.seller:
+                    continue
+                data.person_position[trade.buyer][product] = (trade.price, trade.quantity)
+                data.person_position[trade.seller][product] = (trade.price, -trade.quantity)
         
         # round 1
         # calculate bid/ask range
@@ -491,8 +518,8 @@ class Trader:
             orders += self.calculate_round1_orders(product, order_depth, acceptable_bids[product], acceptable_asks[product])
             result[product] = orders
 
-        # round 2
         
+        # round 2
         for product in self.round2_products:
             order_depth: OrderDepth = state.order_depths[product]
             orders: list[Order] = []
@@ -521,8 +548,8 @@ class Trader:
         orders = self.calculate_round4_orders_v2(state.order_depths, data)
         for product in self.round4_products:
             result[product] = orders[product]
-
-
+        
+        
         traderData = jsonpickle.encode(data)
 
         logger.flush(state, result, conversions, traderData)
@@ -530,79 +557,6 @@ class Trader:
         return result, conversions, traderData
     
     def calculate_round4_orders(self, order_depths: dict[str, OrderDepth], data = None)-> dict[str, list]:
-        prods = self.round4_products
-        orders = {p: [] for p in prods}
-        osell, obuy, best_sell, best_buy, mid_price = {}, {}, {}, {}, {}
-
-
-        for p in prods:
-            order_depth = order_depths[p]
-
-            osell[p] = collections.OrderedDict(sorted(order_depths[p].sell_orders.items()))
-            obuy[p] = collections.OrderedDict(sorted(order_depths[p].buy_orders.items(), reverse=True))
-            
-            sell_vol, best_sell_price = self.values_extract(osell[p], buy=False)
-            buy_vol, best_buy_price = self.values_extract(obuy[p], buy=True)
-
-            best_sell[p] = best_sell_price
-            best_buy[p] = best_buy_price
-            mid_price[p] = (best_buy_price + best_sell_price) / 2
-
-        coconut_mid, coupon_mid = mid_price['COCONUT'], mid_price['COCONUT_COUPON']
-        implied_vol = self.newtons_method(lambda sigma: self.black_scholes_price(coconut_mid, 10000, 250, 0, sigma) - coupon_mid)
-        # data.coconut_coupon_implied_vol_cache.append(implied_vol)
-
-        # if len(data.coconut_coupon_implied_vol_cache) == data.coconut_coupon_implied_vol_size + 1:
-            # data.coconut_coupon_implied_vol_cache.pop(0)
-        implied_vol_mean, implied_vol_std = 0.010043927128326914, 0.00022995153208052514# np.mean(data.coconut_coupon_implied_vol_cache), np.std(data.coconut_coupon_implied_vol_cache)
-        fair_coupon_price, delta = self.black_scholes_price(S = coconut_mid, sigma = implied_vol_mean, delta = True)
-
-        z_score = (implied_vol - implied_vol_mean) / implied_vol_std
-
-
-        if z_score > self.coconut_coupon_z_score: # over priced, let's sell coupon buy coconut
-            coupon_position = self.position['COCONUT_COUPON']
-            fair_ask = best_buy['COCONUT_COUPON']
-            coupon_num_orders = 0
-            for bid, vol in obuy['COCONUT_COUPON'].items():
-                if coupon_position > -self.POSITION_LIMIT['COCONUT_COUPON'] and (bid >= fair_ask or (coupon_position > 0 and bid + 1 == fair_ask)):
-                    num_orders = max(-vol, - self.POSITION_LIMIT['COCONUT_COUPON'] - coupon_position)
-                    coupon_position += num_orders
-                    coupon_num_orders += num_orders
-                    orders['COCONUT_COUPON'].append(Order('COCONUT_COUPON', bid, num_orders))
-            
-            coconut_position, delta_hedging_vol = self.position['COCONUT'], -coupon_num_orders * delta
-            for ask, vol in osell['COCONUT'].items():
-                if coconut_position < self.POSITION_LIMIT['COCONUT'] and delta_hedging_vol > 0:
-                    num_orders = int(min(-vol, delta_hedging_vol, self.POSITION_LIMIT['COCONUT'] - coconut_position))
-                    coconut_position += num_orders
-                    delta_hedging_vol -= num_orders
-                    orders['COCONUT'].append(Order('COCONUT', ask, num_orders))
-
-        elif z_score < -self.coconut_coupon_z_score: # under priced, let's buy coupon sell coconut
-            coupon_position = self.position['COCONUT_COUPON']
-            fair_buy = best_sell['COCONUT_COUPON']
-            coupon_num_orders = 0
-            for ask, vol in osell['COCONUT_COUPON'].items():
-                if coupon_position < self.POSITION_LIMIT['COCONUT_COUPON'] and (ask <= fair_buy or (coupon_position < 0 and ask == fair_buy + 1)):
-                    num_orders = min(-vol, self.POSITION_LIMIT['COCONUT_COUPON'] - coupon_position)
-                    coupon_position += num_orders
-                    coupon_num_orders += num_orders
-                    orders['COCONUT_COUPON'].append(Order('COCONUT_COUPON', ask, num_orders))
-            
-            coconut_position, delta_hedging_vol = self.position['COCONUT'], coupon_num_orders * delta
-            
-            for bid, vol in obuy['COCONUT'].items():
-                if coconut_position > -self.POSITION_LIMIT['COCONUT'] and delta_hedging_vol > 0:
-                    num_orders = int(max(-vol, -delta_hedging_vol, -self.POSITION_LIMIT['COCONUT'] - coconut_position))
-                    coconut_position += num_orders
-                    delta_hedging_vol += num_orders
-                    orders['COCONUT'].append(Order('COCONUT', bid, num_orders))
-                    
-
-        return orders
-
-    def calculate_round4_orders_v2(self, order_depths: dict[str, OrderDepth], data = None)-> dict[str, list]:
         prods = self.round4_products
         orders = {p: [] for p in prods}
         osell, obuy, best_sell, best_buy, mid_price = {}, {}, {}, {}, {}
@@ -622,7 +576,7 @@ class Trader:
         coconut_mid, coupon_mid = mid_price['COCONUT'], mid_price['COCONUT_COUPON']
         
         fair_coupon_price, delta = self.black_scholes_price(S = coconut_mid, delta = True)
-        our_bid, our_ask = fair_coupon_price, fair_coupon_price
+        our_bid, our_ask = fair_coupon_price - self.coconut_coupon_spread, fair_coupon_price + self.coconut_coupon_spread
         logger.print(f" Fair Coupon Price: {fair_coupon_price} Delta: {delta}")
 
 
@@ -662,8 +616,94 @@ class Trader:
                 coconut_position += num_orders
                 delta_hedging_vol -= num_orders
                 orders['COCONUT'].append(Order('COCONUT', ask, num_orders))
-                
+        return orders
 
+    def calculate_round4_orders_v2(self, order_depths: dict[str, OrderDepth], data = None)-> dict[str, list]:
+        prods = self.round4_products
+        orders = {p: [] for p in prods}
+        osell, obuy, best_sell, best_buy, mid_price = {}, {}, {}, {}, {}
+
+
+        for p in prods:
+            osell[p] = collections.OrderedDict(sorted(order_depths[p].sell_orders.items()))
+            obuy[p] = collections.OrderedDict(sorted(order_depths[p].buy_orders.items(), reverse=True))
+            
+            sell_vol, best_sell_price = self.values_extract(osell[p], buy=False)
+            buy_vol, best_buy_price = self.values_extract(obuy[p], buy=True)
+
+            best_sell[p] = best_sell_price
+            best_buy[p] = best_buy_price
+            mid_price[p] = (best_buy_price + best_sell_price) / 2
+
+        coconut_mid, coupon_mid = mid_price['COCONUT'], mid_price['COCONUT_COUPON']
+
+        raj_price, raj_signal = data.person_position['Raj']['COCONUT'] if 'COCONUT' in data.person_position['Raj'] else (0, 0)
+        if raj_signal > 0:
+            coconut_mid += 5
+        elif raj_signal < 0:
+            coconut_mid -= 5
+        
+        fair_coupon_price, delta = self.black_scholes_price(S = coconut_mid, delta = True)
+        our_bid, our_ask = fair_coupon_price - self.coconut_coupon_spread - 3, fair_coupon_price + self.coconut_coupon_spread + 3
+        logger.print(f" Fair Coupon Price: {fair_coupon_price} Delta: {delta}")
+
+        coupon_position = self.position['COCONUT_COUPON']
+        coupon_num_orders = 0
+        # MARKET TAKE ASKS (buy items)
+        for ask, vol in osell['COCONUT_COUPON'].items():
+            if coupon_position < self.POSITION_LIMIT['COCONUT_COUPON']  and (ask <= our_bid or (coupon_position < 0 and ask == our_bid + 1)): 
+                num_orders = min(-vol, self.POSITION_LIMIT['COCONUT_COUPON'] - coupon_position)
+                coupon_position += num_orders
+                coupon_num_orders += num_orders
+                orders['COCONUT_COUPON'].append(Order('COCONUT_COUPON', ask, num_orders))
+
+        coconut_position, delta_hedging_vol = self.position['COCONUT'], coupon_num_orders * delta
+        if raj_signal > 0:
+            delta_hedging_vol = int(delta_hedging_vol * 0.9)
+        elif raj_signal < 0:
+            delta_hedging_vol = int(delta_hedging_vol * 1.1)
+        
+        for bid, vol in obuy['COCONUT'].items():
+            if coconut_position > -self.POSITION_LIMIT['COCONUT'] and delta_hedging_vol > 0:
+                num_orders = int(max(-vol, -delta_hedging_vol, -self.POSITION_LIMIT['COCONUT'] - coconut_position))
+                coconut_position += num_orders
+                delta_hedging_vol += num_orders
+                orders['COCONUT'].append(Order('COCONUT', bid, num_orders))
+        '''
+        if raj_signal < 0:
+            num_orders = int(-self.POSITION_LIMIT['COCONUT'] - coconut_position)
+            orders['COCONUT'].append(Order('COCONUT', best_buy['COCONUT'] + 3, num_orders))
+        '''
+        coupon_position = self.position['COCONUT_COUPON']
+        coupon_num_orders = 0
+        # MARKET TAKE BIDS (sell items)
+        for bid, vol in obuy['COCONUT_COUPON'].items():
+            if coupon_position > -self.POSITION_LIMIT['COCONUT_COUPON'] and (bid >= our_ask or (coupon_position > 0 and bid == our_ask - 1)):
+                num_orders = max(-vol, - self.POSITION_LIMIT['COCONUT_COUPON'] - coupon_position)
+                coupon_position += num_orders
+                coupon_num_orders += num_orders
+                orders['COCONUT_COUPON'].append(Order('COCONUT_COUPON', bid, num_orders))
+
+        coconut_position, delta_hedging_vol = self.position['COCONUT'], -coupon_num_orders * delta
+        if raj_signal < 0:
+            delta_hedging_vol = int(delta_hedging_vol * 0.9)
+        elif raj_signal > 0:
+            delta_hedging_vol = int(delta_hedging_vol * 1.1)
+
+        for ask, vol in osell['COCONUT'].items():
+            if coconut_position < self.POSITION_LIMIT['COCONUT'] and delta_hedging_vol > 0:
+                num_orders = int(min(-vol, delta_hedging_vol, self.POSITION_LIMIT['COCONUT'] - coconut_position))
+                coconut_position += num_orders
+                delta_hedging_vol -= num_orders
+                orders['COCONUT'].append(Order('COCONUT', ask, num_orders))
+
+        '''
+        if raj_signal > 0:
+            num_orders = int(self.POSITION_LIMIT['COCONUT'] - coconut_position)
+            orders['COCONUT'].append(Order('COCONUT', best_sell['COCONUT'] - 3, num_orders))
+        '''
+        
+                
         return orders
 
     def calculate_round4_orders_v3(self, order_depths: dict[str, OrderDepth], data = None)-> dict[str, list]:
@@ -782,7 +822,7 @@ class Trader:
             if vol > 0:
                 basket_sell_sig = 1
                 orders['GIFT_BASKET'].append(Order('GIFT_BASKET', worst_buy['GIFT_BASKET'], -vol)) # sell
-                if res_sell > trade_at * 1.6:
+                if res_sell > trade_at * 1.3:
                     orders['CHOCOLATE'].append(Order('CHOCOLATE', worst_sell['CHOCOLATE'], vol * 4))
                     orders['STRAWBERRIES'].append(Order('STRAWBERRIES', worst_sell['STRAWBERRIES'], vol * 6))
                     orders['ROSES'].append(Order('ROSES', worst_sell['ROSES'], vol))
@@ -795,7 +835,7 @@ class Trader:
             if vol > 0:
                 basket_buy_sig = 1
                 orders['GIFT_BASKET'].append(Order('GIFT_BASKET', worst_sell['GIFT_BASKET'], vol))
-                if res_buy < -trade_at * 1.6:
+                if res_buy < -trade_at * 1.3:
                     orders['CHOCOLATE'].append(Order('CHOCOLATE', worst_buy['CHOCOLATE'], -vol * 4))
                     orders['STRAWBERRIES'].append(Order('STRAWBERRIES', worst_buy['STRAWBERRIES'], -vol * 6))
                     orders['ROSES'].append(Order('ROSES', worst_buy['ROSES'], -vol))

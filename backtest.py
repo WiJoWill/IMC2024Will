@@ -283,7 +283,7 @@ class BacktestingSystem:
         return states, trader, profits_by_symbol, balance_by_symbol
 
 
-    def simulate_alternative(self, round: int, day: int, trader, time_limit=999900, names=False, halfway = False, other_traders = False, other_trader_names=['Caesar', 'Camilla', 'Peter']):
+    def simulate_alternative(self, round: int, day: int, trader, time_limit=999900, names=False, halfway = False, other_traders = False, other_trader_names=['Valentina'], other_trader_info_save = False):
         # Same as the previous simulate_alternative function but now a method of the class
         # Adjustments: Replace global constants and functions with self.attribute or self.method()
         
@@ -308,20 +308,57 @@ class BacktestingSystem:
 
         states, trader, profits_by_symbol, balance_by_symbol = self.trades_position_pnl_run(states, max_time, profits_by_symbol, balance_by_symbol, credit_by_symbol, unrealized_by_symbol, halfway)
         self.create_log_files(round, day, states, profits_by_symbol, balance_by_symbol, trader)
-        # profit_balance_monkeys = {}
-        # trades_monkeys = {}
-        '''
+        
         if other_traders:
-            
-            profit_balance_monkeys, trades_monkeys, profit_monkeys, balance_monkeys, monkey_positions_by_timestamp = monkey_positions(other_trader_names, states, round)
-            print("End of monkey simulation reached.")
-            print(f'PNL + BALANCE monkeys {profit_balance_monkeys[max_time]}')
-            print(f'Trades monkeys {trades_monkeys[max_time]}')
-        '''
+            profit_balance_snakes, trade_snakes, profit_snakes, balance_snakes, snake_positions_by_timestamp = self.snake_positions(other_trader_names, states, round, max_time)
+            print("End of snake simulation reached.")
+            print(f'PNL + BALANCE snakes {profit_balance_snakes[max_time]}')
+
+            if other_trader_info_save:
+                directory = './training/other_traders_info'
+                if not os.path.exists(directory):
+                    os.makedirs(directory)
+
+                file_path = os.path.join(directory, f'round_{round}_day_{day}_profit_balance_snakes.json')
+                with open(file_path, 'w') as file:
+                    json.dump(profit_balance_snakes, file, indent=4)
+                file.close()
+                
+                file_path = os.path.join(directory, f'round_{round}_day_{day}_profit_snakes.json')
+                with open(file_path, 'w') as file:
+                    json.dump(profit_snakes, file, indent=4)
+                file.close()
+
+                file_path = os.path.join(directory, f'round_{round}_day_{day}_balance_snakes.json')
+                with open(file_path, 'w') as file:
+                    json.dump(balance_snakes, file, indent=4)
+                file.close()
+
+                file_path = os.path.join(directory, f'round_{round}_day_{day}_snake_positions_by_timestamp.json')
+                with open(file_path, 'w') as file:
+                    json.dump(snake_positions_by_timestamp, file, indent=4)
+                file.close()
+
+                trade_snakes_readable: dict[int, dict[str, list[set]]] = {0: dict(zip(other_trader_names, [[] for x in range(len(other_trader_names))]))}
+
+                for timestamp in trade_snakes:
+                    if trade_snakes_readable.get(timestamp + self.TIME_DELTA) == None:
+                        trade_snakes_readable[timestamp + self.TIME_DELTA] =  copy.deepcopy(trade_snakes_readable[timestamp])
+                    for trader in trade_snakes[timestamp]:
+                        trade_obj_list = trade_snakes[timestamp][trader]
+                        for trade_obj in trade_obj_list:
+                            trade_snakes_readable[timestamp][trader].append((trade_obj.symbol, trade_obj.price, trade_obj.quantity))
+
+                file_path = os.path.join(directory, f'round_{round}_day_{day}_trades_snakes.json')
+                with open(file_path, 'w') as file:
+                    json.dump(trade_snakes_readable, file, indent=4)
+                file.close()
+        
         if hasattr(trader, 'after_last_round'):
             if callable(trader.after_last_round): #type: ignore
                 trader.after_last_round(profits_by_symbol, balance_by_symbol) #type: ignore
-    # Additional methods for cleanup_order_volumes, clear_order_book, create_log_file, etc., similarly converted
+
+        # Additional methods for cleanup_order_volumes, clear_order_book, create_log_file, etc., similarly converted
         
         self.build_plots(profits_by_symbol, round, day)
 
@@ -427,8 +464,6 @@ class BacktestingSystem:
                 ha='center'
             )
 
-            
-
         for product in total_values:
             axs[-1].plot(timestamps, total_values[product], label = f'{product} Value')
             axs[-1].set_title('Values of  All Products')
@@ -449,11 +484,98 @@ class BacktestingSystem:
         plt.close(fig)
 
 
+
+    def snake_positions(self, snake_names: list[str], states: dict[int, TradingState], round, max_time):
+        profits_by_symbol: dict[int, dict[str, dict[str, float]]] = { 0: {} }
+        balance_by_symbol: dict[int, dict[str, dict[str, float]]] =  { 0: {} }
+        credit_by_symbol: dict[int, dict[str, dict[str, float]]] = { 0: {} }
+        unrealized_by_symbol: dict[int, dict[str, dict[str, float]]] = { 0: {} }
+        prev_snake_positions: dict[str, dict[str, int]] = {}
+        snake_positions: dict[str, dict[str, int]] = {}
+        trades_by_round: dict[int, dict[str, list[Trade]]]  = { 0: dict(zip(snake_names,  [[] for x in range(len(snake_names))])) }
+        profit_balance: dict[int, dict[str, dict[str, float]]] = { 0: {} }
+
+        snake_positions_by_timestamp: dict[int, dict[str, dict[str, int]]] = {}
+
+        for snake in snake_names:
+            ref_symbols = list(states[0].position.keys())
+            profits_by_symbol[0][snake] = dict(zip(ref_symbols, [0.0]*len(ref_symbols)))
+            balance_by_symbol[0][snake] = copy.deepcopy(profits_by_symbol[0][snake])
+            credit_by_symbol[0][snake] = copy.deepcopy(profits_by_symbol[0][snake])
+            unrealized_by_symbol[0][snake] = copy.deepcopy(profits_by_symbol[0][snake])
+            profit_balance[0][snake] = copy.deepcopy(profits_by_symbol[0][snake])
+            snake_positions[snake] = dict(zip(self.ASSET_SYMBOLS_POSITIONABLE[round], [0]*len(self.ASSET_SYMBOLS_POSITIONABLE[round])))
+            prev_snake_positions[snake] = copy.deepcopy(snake_positions[snake])
+
+        for time, state in states.items():
+            already_calculated = False
+            for snake in snake_names:
+                position = copy.deepcopy(snake_positions[snake])
+                mids = self.calc_mid(states, round, time, max_time)
+                if trades_by_round.get(time + self.TIME_DELTA) == None:
+                    trades_by_round[time + self.TIME_DELTA] =  copy.deepcopy(trades_by_round[time])
+
+                for psymbol in self.ASSET_SYMBOLS_POSITIONABLE[round]:
+                    if already_calculated:
+                        break
+                    if state.market_trades.get(psymbol):
+                        for market_trade in state.market_trades[psymbol]:
+                            if trades_by_round[time].get(market_trade.buyer) != None:
+                                trades_by_round[time][market_trade.buyer].append(Trade(psymbol, market_trade.price, market_trade.quantity))
+                            if trades_by_round[time].get(market_trade.seller) != None:
+                                trades_by_round[time][market_trade.seller].append(Trade(psymbol, market_trade.price, -market_trade.quantity))
+                already_calculated = True
+
+                if profit_balance.get(time + self.TIME_DELTA) == None and time != max_time:
+                    profit_balance[time + self.TIME_DELTA] = copy.deepcopy(profit_balance[time])
+                if profits_by_symbol.get(time + self.TIME_DELTA) == None and time != max_time:
+                    profits_by_symbol[time + self.TIME_DELTA] = copy.deepcopy(profits_by_symbol[time])
+                if credit_by_symbol.get(time + self.TIME_DELTA) == None and time != max_time:
+                    credit_by_symbol[time + self.TIME_DELTA] = copy.deepcopy(credit_by_symbol[time])
+                if balance_by_symbol.get(time + self.TIME_DELTA) == None and time != max_time:
+                    balance_by_symbol[time + self.TIME_DELTA] = copy.deepcopy(balance_by_symbol[time])
+                if unrealized_by_symbol.get(time + self.TIME_DELTA) == None and time != max_time:
+                    unrealized_by_symbol[time + self.TIME_DELTA] = copy.deepcopy(unrealized_by_symbol[time])
+                    for psymbol in self.ASSET_SYMBOLS_POSITIONABLE[round]:
+                        unrealized_by_symbol[time + self.TIME_DELTA][snake][psymbol] = mids[psymbol]*position[psymbol]
+                valid_trades = []
+                if trades_by_round[time].get(snake) != None:  
+                    valid_trades = trades_by_round[time][snake]
+                FLEX_TIME_DELTA = self.TIME_DELTA
+                if time == max_time:
+                    FLEX_TIME_DELTA = 0
+                for valid_trade in valid_trades:
+                        position[valid_trade.symbol] += valid_trade.quantity
+                        credit_by_symbol[time + FLEX_TIME_DELTA][snake][valid_trade.symbol] += -valid_trade.price * valid_trade.quantity
+                if states.get(time + FLEX_TIME_DELTA) != None:
+                    for psymbol in self.ASSET_SYMBOLS_POSITIONABLE[round]:
+                        unrealized_by_symbol[time + FLEX_TIME_DELTA][snake][psymbol] = mids[psymbol]*position[psymbol]
+                        if position[psymbol] == 0 and prev_snake_positions[snake][psymbol] != 0:
+                            profits_by_symbol[time + FLEX_TIME_DELTA][snake][psymbol] += credit_by_symbol[time + FLEX_TIME_DELTA][snake][psymbol]
+                            credit_by_symbol[time + FLEX_TIME_DELTA][snake][psymbol] = 0
+                            balance_by_symbol[time + FLEX_TIME_DELTA][snake][psymbol] = 0
+                        else:
+                            balance_by_symbol[time + FLEX_TIME_DELTA][snake][psymbol] = credit_by_symbol[time + FLEX_TIME_DELTA][snake][psymbol] + unrealized_by_symbol[time + FLEX_TIME_DELTA][snake][psymbol]
+                        profit_balance[time + FLEX_TIME_DELTA][snake][psymbol] = profits_by_symbol[time + FLEX_TIME_DELTA][snake][psymbol] + balance_by_symbol[time + FLEX_TIME_DELTA][snake][psymbol]
+                prev_snake_positions[snake] = copy.deepcopy(snake_positions[snake])
+                snake_positions[snake] = position
+                if time == max_time:
+                    # i have the feeling this already has been done, and only repeats the same values as before
+                    for osymbol in position.keys():
+                        profits_by_symbol[time + FLEX_TIME_DELTA][snake][osymbol] += credit_by_symbol[time + FLEX_TIME_DELTA][snake][osymbol] + unrealized_by_symbol[time + FLEX_TIME_DELTA][snake][osymbol]
+                        balance_by_symbol[time + FLEX_TIME_DELTA][snake][osymbol] = 0
+            snake_positions_by_timestamp[time] = copy.deepcopy(snake_positions)
+        return profit_balance, trades_by_round, profits_by_symbol, balance_by_symbol, snake_positions_by_timestamp
+
+
+
 if __name__ == "__main__":
     # Example usage
     trader = Trader()  # Assuming Trader is defined elsewhere as per the provided snippets
     backtest_system = BacktestingSystem()
     #os.chdir('IMC2024Will')
-    round = 4 # Example parameters
-    day = 3
-    backtest_system.simulate_alternative(round, day, trader)
+    round = 4# Example parameters
+    day = 1
+    other_trader_names = ['Valentina', 'Vinnie', 'Vladimir', 'Vivian', 'Celeste', 'Colin', 'Carlos', 'Camilla', 'Pablo', 'Penelope', 
+                          'Percy', 'Petunia', 'Ruby', 'Remy', 'Rhianna', 'Raj', 'Amelia', 'Adam', 'Alina', 'Amir']
+    backtest_system.simulate_alternative(round, day, trader, names= True, other_traders=False, other_trader_names=other_trader_names, other_trader_info_save=True)
